@@ -1,0 +1,6 @@
+{
+  "name": "Web-Dev V3 AI Sandbox",
+  "description": "A live web development sandbox powered by Gemini. Build and orchestrate full web applications from templates, generate code from prompts, and see results instantly.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
