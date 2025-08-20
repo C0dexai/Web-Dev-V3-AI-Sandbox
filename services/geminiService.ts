@@ -15,10 +15,26 @@ ${content}
 `;
         });
     
+    let containerEnvContext = '';
+    if (previewRoot && previewRoot.startsWith('/containers/')) {
+        const handoverPath = `${previewRoot.endsWith('/') ? previewRoot.slice(0, -1) : previewRoot}/handover.json`;
+        if (fileSystem[handoverPath]) {
+            try {
+                const handover = JSON.parse(fileSystem[handoverPath]);
+                if (handover.env && Object.keys(handover.env).length > 0) {
+                    const envVars = Object.keys(handover.env).join(', ');
+                    containerEnvContext = `\nThis container has the following environment variables available for its backend/inference logic: ${envVars}. You should use these when generating code that requires API keys or other secrets. The user has already provided the values, so you should write code that reads them from the environment (e.g. \`process.env.${Object.keys(handover.env)[0]}\`), do not hardcode them or ask for them.`;
+                }
+            } catch (e) {
+                // Ignore parse errors, handover might be malformed
+            }
+        }
+    }
+    
     const previewContext = previewRoot ? `The user is currently previewing the project from the "${previewRoot}" directory.` : 'The user is currently previewing the root directory.';
 
     return `Here is the current state of all files in the project. Use this as context for the user's request.
-${previewContext}
+${previewContext}${containerEnvContext}
 ${fileEntries.join('')}
 ---
 `;

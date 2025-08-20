@@ -21,6 +21,8 @@ const CreateContainerModal: React.FC<CreateContainerModalProps> = ({ isOpen, onC
     const [baseTemplate, setBaseTemplate] = useState('');
     const [uiTemplate, setUiTemplate] = useState('');
     const [datastoreTemplate, setDatastoreTemplate] = useState('');
+    const [apiName, setApiName] = useState('');
+    const [apiKey, setApiKey] = useState('');
 
     const registry = useMemo((): TemplateRegistry | null => {
         try {
@@ -67,6 +69,11 @@ const CreateContainerModal: React.FC<CreateContainerModalProps> = ({ isOpen, onC
 
         // 3. Create handover.json
         const now = new Date().toISOString();
+        const env: { [key: string]: string } = {};
+        if (apiName.trim() && apiKey.trim()) {
+            env[apiName.trim()] = apiKey.trim();
+        }
+        
         const newHandover: Handover = {
             container_id: containerId,
             operator,
@@ -76,6 +83,7 @@ const CreateContainerModal: React.FC<CreateContainerModalProps> = ({ isOpen, onC
                 ui: uiTemplate ? [uiTemplate] : [],
                 datastore: datastoreTemplate,
             },
+            env: Object.keys(env).length > 0 ? env : undefined,
             status: 'initialized',
             created_at: now,
             history: [{
@@ -87,6 +95,7 @@ const CreateContainerModal: React.FC<CreateContainerModalProps> = ({ isOpen, onC
                     base: baseTemplate,
                     ui: uiTemplate,
                     datastore: datastoreTemplate,
+                    env: Object.keys(env).length > 0 ? env : undefined,
                 }
             }]
         };
@@ -102,6 +111,8 @@ const CreateContainerModal: React.FC<CreateContainerModalProps> = ({ isOpen, onC
         setBaseTemplate('');
         setUiTemplate('');
         setDatastoreTemplate('');
+        setApiName('');
+        setApiKey('');
     };
 
     if (!isOpen) return null;
@@ -154,6 +165,19 @@ const CreateContainerModal: React.FC<CreateContainerModalProps> = ({ isOpen, onC
                                     <option value="">Select Datastore...</option>
                                     {Object.keys(registry.DATASTORE).map(key => <option key={key} value={key}>{key}</option>)}
                                 </select>
+                            </div>
+                            <div className="pt-4 border-t border-[var(--card-border)]">
+                                <h3 className="text-base font-semibold text-gray-300 mb-2">Environment Variables (Optional)</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label htmlFor="api-name" className={labelStyle}>API Name</label>
+                                        <input id="api-name" type="text" value={apiName} onChange={e => setApiName(e.target.value)} className={inputStyle} placeholder="e.g., OPENAI_API_KEY" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="api-key" className={labelStyle}>API Key</label>
+                                        <input id="api-key" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} className={inputStyle} placeholder="Enter secret key" />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}

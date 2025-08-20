@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 
 export interface IconProps {
@@ -439,5 +440,13 @@ export const CpuIcon: React.FC<IconProps> = ({ className }) => (
         <line x1="20" y1="14" x2="23" y2="14" />
         <line x1="1" y1="9" x2="4" y2="9" />
         <line x1="1" y1="14" x2="4" y2="14" />
+    </svg>
+);
+
+export const KeyIcon: React.FC<IconProps> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <circle cx="7.5" cy="15.5" r="5.5" />
+        <path d="M12 11l7-7" />
+        <path d="M14 6l5 5" />
     </svg>
 );

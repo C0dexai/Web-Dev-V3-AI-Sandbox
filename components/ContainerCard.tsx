@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { Container, HandoverHistoryItem } from '../types';
-import { CpuIcon, PlayIcon, TerminalIcon, CheckIcon, XIcon, SpinnerIcon } from './Icons';
+import { CpuIcon, PlayIcon, TerminalIcon, CheckIcon, XIcon, SpinnerIcon, KeyIcon } from './Icons';
 
 interface ContainerCardProps {
   container: Container;
@@ -15,6 +15,7 @@ const buttonStyle = "flex items-center justify-center gap-2 text-xs bg-black/30 
 const ContainerCard: React.FC<ContainerCardProps> = ({ container, onRunCommand, onDebug, isLoading, activeCommand }) => {
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const { handover } = container;
+    const envVars = handover.env ? Object.entries(handover.env) : [];
 
     const isActionRunning = (action: string) => isLoading && activeCommand === `${action}-${container.id}`;
 
@@ -39,6 +40,17 @@ const ContainerCard: React.FC<ContainerCardProps> = ({ container, onRunCommand, 
                     </div>
                 </div>
                 <p className="text-xs text-gray-300 mt-2 italic">"{handover.prompt}"</p>
+                 {envVars.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-white/10">
+                        <p className="text-xs font-semibold text-gray-400 mb-1">Environment:</p>
+                        {envVars.map(([key]) => (
+                            <div key={key} className="flex items-center gap-2 text-xs font-mono text-gray-300">
+                                <KeyIcon className="h-3 w-3 text-yellow-400" />
+                                <span>{key}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
             <div className="flex items-center justify-end gap-2 p-2 border-t border-[var(--card-border)] bg-black/10">
                 <button 

@@ -82,6 +82,7 @@ export interface HandoverHistoryItem {
     status?: 'success' | 'failure';
     error?: string;
     feature?: string;
+    env?: { [key: string]: string };
     [key: string]: any;
   }
 }
@@ -94,6 +95,9 @@ export interface Handover {
     base: string;
     ui: string[];
     datastore: string;
+  };
+  env?: {
+    [key: string]: string;
   };
   status: 'initialized' | 'installing' | 'building' | 'running' | 'error';
   created_at: string; // ISO string
