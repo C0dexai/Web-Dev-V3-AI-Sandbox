@@ -1,25 +1,16 @@
 import React, { useState } from 'react';
+import useStore from '../store';
 import { GithubIcon, SpinnerIcon } from './Icons';
-import type { GithubUser, GithubRepo, GithubBranch, FileChange } from '../types';
+import type { FileChange } from '../types';
 
 interface GithubPanelProps {
-    isConnected: boolean;
-    user: GithubUser | null;
-    repos: GithubRepo[];
-    branches: GithubBranch[];
-    selectedRepo: string;
-    selectedBranch: string;
-    changedFiles: FileChange[];
     isLoading: boolean;
-    error: string;
     onConnect: (token: string) => void;
     onDisconnect: () => void;
     onRepoSelected: (repoFullName: string) => void;
     onBranchSelected: (branchName: string) => void;
     onLoadRepo: () => void;
     onCommit: (message: string) => void;
-    initialToken: string;
-    onTokenChange: (token: string) => void;
 }
 
 const inputStyles = "w-full p-2 bg-black/30 border border-[var(--card-border)] rounded-md focus:ring-2 focus:ring-[var(--neon-purple)] focus:border-[var(--neon-purple)] focus:outline-none transition font-mono text-sm disabled:opacity-50";
@@ -27,15 +18,30 @@ const buttonStyles = "w-full flex items-center justify-center gap-2 bg-[var(--ne
 
 
 const GithubPanel: React.FC<GithubPanelProps> = ({
-    isConnected, user, repos, branches, selectedRepo, selectedBranch, changedFiles,
-    isLoading, error, onConnect, onDisconnect, onRepoSelected, onBranchSelected,
-    onLoadRepo, onCommit, initialToken, onTokenChange
+    isLoading, onConnect, onDisconnect, onRepoSelected, onBranchSelected,
+    onLoadRepo, onCommit
 }) => {
+    const { 
+        isConnected, user, repos, branches, selectedRepo, selectedBranch, 
+        changedFiles, error, githubToken, setGithubToken 
+    } = useStore(state => ({
+        isConnected: state.isGithubConnected,
+        user: state.githubUser,
+        repos: state.githubRepos,
+        branches: state.repoBranches,
+        selectedRepo: state.selectedRepoFullName,
+        selectedBranch: state.selectedBranchName,
+        changedFiles: state.changedFiles,
+        error: state.error,
+        githubToken: state.githubToken,
+        setGithubToken: state.setGithubToken,
+    }));
+    
     const [commitMessage, setCommitMessage] = useState('');
 
     const handleConnect = (e: React.FormEvent) => {
         e.preventDefault();
-        onConnect(initialToken);
+        onConnect(githubToken);
     };
 
     const handleCommit = (e: React.FormEvent) => {
@@ -65,14 +71,14 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
                     <input
                         id="github-token"
                         type="password"
-                        value={initialToken}
-                        onChange={(e) => onTokenChange(e.target.value)}
+                        value={githubToken}
+                        onChange={(e) => setGithubToken(e.target.value)}
                         className={inputStyles}
                         placeholder="ghp_..."
                         disabled={isLoading}
                     />
                 </div>
-                <button type="submit" disabled={isLoading || !initialToken} className={buttonStyles}>
+                <button type="submit" disabled={isLoading || !githubToken} className={buttonStyles}>
                     {isLoading ? <SpinnerIcon className="h-5 w-5 animate-spin" /> : <GithubIcon className="h-5 w-5" />}
                     <span>{isLoading ? 'Connecting...' : 'Connect'}</span>
                 </button>
@@ -119,7 +125,7 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
             {/* Source Control (Commit) */}
             {changedFiles.length > 0 && (
                 <form onSubmit={handleCommit} className="space-y-3 pt-4 border-t border-[var(--card-border)]">
-                    <h3 className="font-semibold">Source Control</h3>
+                    <h3 className="font-semibold">Source Control ({changedFiles.length})</h3>
                     <div className="space-y-1 max-h-40 overflow-y-auto pr-2">
                         {changedFiles.map(file => (
                             <div key={file.path} className="flex items-center justify-between text-sm font-mono bg-black/20 p-2 rounded-md">

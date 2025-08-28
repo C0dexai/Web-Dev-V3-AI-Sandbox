@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { chatWithAgent, refineCodeWithAgent, getAiHint, runCommandInTerminal } from '../services/geminiService';
 import * as githubService from '../services/githubService';
-import type { FileSystemState, ChatMessage, GithubRepo, GithubBranch, GithubUser, FileChange, TerminalLine, Container } from '../types';
-import { SpinnerIcon, MagicWandIcon, LightbulbIcon, XIcon, DocumentTextIcon, GeminiIcon, MaximizeIcon, MinimizeIcon, ChevronDownIcon, ChevronUpIcon, GithubIcon, CodeIcon, TerminalIcon, CpuIcon } from './Icons';
+import useStore from '../store';
+import type { FileSystemState, ChatMessage, TerminalLine } from '../types';
+import { SpinnerIcon, MagicWandIcon, LightbulbIcon, DocumentTextIcon, GeminiIcon, MaximizeIcon, MinimizeIcon, ChevronDownIcon, ChevronUpIcon, CodeIcon, TerminalIcon, XIcon } from './Icons';
 import CollapsibleSection from './CollapsibleSection';
 import ChatMessageView from './ChatMessage';
 import FileExplorer from './FileExplorer';
@@ -12,204 +13,11 @@ import Terminal from './Terminal';
 import { marked } from 'marked';
 import { v4 as uuidv4 } from 'uuid';
 import JSZip, { type JSZipObject } from 'jszip';
-import dbService from '../services/dbService';
 import OrbMenu from './OrbMenu';
 import GithubPanel from './GithubPanel';
 import InlineEditor from './InlineEditor';
 import ApplyChangesModal from './ApplyChangesModal';
 import UnpackZipModal from './UnpackZipModal';
-
-
-const readmeContent = `# Live Web Dev Sandbox with Gemini AI & GitHub Integration
-
-This is a powerful, browser-based development environment that combines the creative power of the Google Gemini AI with the version control capabilities of GitHub. It allows you to generate, edit, and manage full web projects using natural language, and then commit your work directly to a repository.
-
----
-
-## Key Features
-
--   **System Operator Build Process**: Orchestrate entire project builds from a registry of templates (React, Tailwind, etc.). Each build is a "container" with its own state and history.
--   **AI-Powered Development**: Instruct the Gemini agent to create files, write HTML, style with CSS/TailwindCSS, and add JavaScript functionality.
--   **Full GitHub Integration**: Connect your GitHub account, load repositories, browse branches, and commit & push changes directly from the app.
--   **Simulated WebContainer Terminal**: An AI-powered terminal that understands common shell commands (\`ls\`, \`cd\`, \`npm install\`, \`npm run build\`) to orchestrate project changes.
--   **Live Preview & Editing**: See your changes reflected instantly. Click on elements to edit them directly in the preview.
--   **Complete File Management**: A familiar file explorer with support for creating files/folders, uploading (including ZIP archives), and downloading your entire project.
-
----
-
-## First Run & Quick Start
-
-1.  **Connect to GitHub (Optional but Recommended)**:
-    *   Go to the "GitHub" panel on the left.
-    *   Enter a [GitHub Personal Access Token (PAT)](https://github.com/settings/tokens?type=beta) with \`repo\` scope. **Your token is stored securely in your browser's local storage and is never exposed.**
-    *   Click "Connect" to load your repositories.
-
-2.  **Create a Project Container**:
-    *   Go to the "System Operator" panel on the left.
-    *   Click "Create New Container".
-    *   Give your operator a name, describe your goal (e.g., "A simple todo app"), and select your templates (e.g., React, Tailwind).
-    *   Click "Create Container". This will create a new project in the \`/containers/\` directory.
-
-3.  **Build Your Project**:
-    *   In the new container's card, click **Install** to simulate \`npm install\`.
-    *   Then click **Build** to simulate \`npm run build\`.
-    *   Set the container's directory (e.g., \`/containers/container_xyz/\`) as the **Preview Root** in the File Explorer to see it live.
-
-4.  **Interact with the AI Agent**:
-    *   Use the "Inference" chat panel at the top. Type a command like:
-        > "In my new React container, add a button to the App component with the text 'Click Me'."
-    *   The agent will reply, explain its work, and show you the proposed code changes. Click **"Apply Code Changes"** to accept them.
-    *   Use the suggested follow-up actions that appear under the AI's response for a guided experience.
-
-5.  **Commit Your Work**:
-    *   Once connected to GitHub and your project is loaded, the "Source Control" section will show all your changes.
-    *   Write a commit message (e.g., "feat: Add new call-to-action button").
-    *   Click **"Commit & Push"**. Your changes are now live on GitHub!
-
----
-
-## Feature Deep Dive
-
-### The System Operator Panel
-
-This is the central hub for managing your projects.
-
--   **Containers**: Each project is a self-contained unit. The file system, dependencies (\`package.json\`), and build history (\`handover.json\`) are stored within its directory in \`/containers/\`.
--   **Template Registry**: The build process uses a file-based registry located in the \`/templates\` directory. The AI is aware of \`/templates/registry.json\` and can use it to assemble new projects based on your requests. You can extend the system by adding new templates to this directory.
--   **Build Commands**: The \`Install\`, \`Build\`, and \`Start\` buttons use the AI-powered terminal to simulate the respective \`npm\` commands, updating the file system and logging the results in the container's \`handover.json\`.
-
-### The Simulated Terminal (WebContainer)
-
-The "Terminal" tab provides a command-line interface powered by a Gemini agent.
-
--   **How it works**: When you run a command like \`npm run build\`, the command is sent to the Gemini agent. The agent reads the project files (like \`package.json\` and \`vite.config.js\`), understands what the build process would do, and returns a *simulated* output, including creating a \`/dist\` directory.
--   **What it's for**: It's a powerful tool for AI-driven orchestration. It allows the System Operator panel and the chat agent to manage project structure and dependencies without a real execution environment.
--   **Limitations**: It does **not** actually execute code, run a live server, or access the network. It's a high-level simulation.
-`;
-
-const systemOperatorReadme = `# 🛠️ SYSTEM OPERATOR BUILD PROCESS
-
-This document outlines the architecture and workflow for the System Operator feature, which enables building and orchestrating applications from a template registry.
-
-## 1. Directory Structure
-
-- \`/templates\`: Contains a static registry of building blocks for projects (e.g., React, Tailwind).
-  - \`registry.json\`: A lookup table describing all available templates.
-- \`/containers\`: Holds dynamic, Operator-created builds. Each container is a self-contained project.
-  - \`container_<id>/\`: A specific project instance.
-    - \`handover.json\`: A log file containing the build history, commands, and metadata for the container.
-
-## 2. Build Orchestration Flow
-
-1.  **Prompt / Operator Choice**: The operator initiates a build via the UI, selecting templates from the registry.
-2.  **Container Creation**: A new folder is created in \`/containers\`, and the files from the chosen templates are copied into it. A \`handover.json\` file is generated to track the build.
-3.  **History Logging**: Every command (e.g., \`npm install\`, \`npm run build\`) is logged to \`handover.json\` with a timestamp and status. This provides a debuggable history for each container.
-4.  **Debugging**: If a command fails, the "Debug" feature can be used. It sends the error logs and \`handover.json\` context to the AI agent for analysis and suggestions.
-`;
-
-const templateRegistry = `{
-  "TEMPLATES": {
-    "REACT": { "path": "/templates/react-vite", "tags": ["spa", "frontend", "vite"] },
-    "VANILLA": { "path": "/templates/vanilla", "tags": ["basic", "javascript"] }
-  },
-  "UI": {
-    "TAILWIND": { "path": "/templates/tailwind-css", "tags": ["styles", "utility-css"] }
-  },
-  "DATASTORE": {
-    "IndexedDB": { "path": "/templates/datastore/indexeddb", "tags": ["local", "browser-db"] }
-  }
-}`;
-
-const initialFileSystem: FileSystemState = {
-  // Main documentation
-  '/README.md': readmeContent,
-  '/SYSTEM_OPERATOR_BUILD_PROCESS.md': systemOperatorReadme,
-
-  // Base project structure
-  '/index.html': '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My Sandbox</title>\n  <link rel="stylesheet" href="/style.css">\n  <script src="https://cdn.tailwindcss.com"></script>\n</head>\n<body>\n  <h1 class="text-3xl font-bold text-center mt-8" data-editable-id="e7a78e4a-58f7-4a7c-b5f3-4d7a7d3e6e8e">Welcome to your Live Sandbox!</h1>\n  <p class="text-center" data-editable-id="b7a78e4a-58f7-4a7c-b5f3-4d7a7d3e6e8f">Click on an element to edit its code directly in the preview.</p>\n  <script src="/script.js"></script>\n</body>\n</html>',
-  '/style.css': 'body { \n  font-family: sans-serif;\n  background-color: #111827; /* A default dark theme */\n  color: #E5E7EB; /* Default light text on dark background */\n}',
-  '/script.js': '// JavaScript goes here',
-
-  // System Operator Directories
-  '/containers/.placeholder': '',
-  '/templates/registry.json': templateRegistry,
-  '/templates/README.md': 'This directory contains all the building block templates for the System Operator. You can add your own templates here and reference them in `registry.json`.',
-
-  // Template: React + Vite
-  '/templates/react-vite/package.json': JSON.stringify({
-    "name": "react-vite-template", "version": "1.0.0", "type": "module",
-    "scripts": { "dev": "vite", "build": "vite build", "start": "vite" },
-    "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" },
-    "devDependencies": { "@vitejs/plugin-react": "^4.0.3", "vite": "^4.4.5" }
-  }, null, 2),
-   '/templates/react-vite/index.html': `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>React Vite App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>`,
-  '/templates/react-vite/src/main.jsx': `import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App.jsx';
-import './index.css';
-
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)`,
-  '/templates/react-vite/src/App.jsx': `function App() {
-  return (
-    <div>
-      <h1>Hello, React + Vite!</h1>
-      <p>Your app is running.</p>
-    </div>
-  )
-}
-export default App`,
-  '/templates/react-vite/src/index.css': `body { margin: 0; font-family: system-ui, sans-serif; }`,
-
-  // Template: Vanilla JS
-  '/templates/vanilla/index.html': `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Vanilla JS Template</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <h1>Hello, Vanilla JS!</h1>
-  <script src="script.js"></script>
-</body>
-</html>`,
-  '/templates/vanilla/style.css': `body { background-color: #f0f0f0; }`,
-  '/templates/vanilla/script.js': `console.log('Vanilla JS template loaded.');`,
-
-  // Template: Tailwind CSS
-  '/templates/tailwind-css/tailwind.config.js': `/** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: ["./**/*.{html,js,jsx}"],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-}`,
-  '/templates/tailwind-css/style.css': `@tailwind base;
-@tailwind components;
-@tailwind utilities;
-`,
-
-  // Template: IndexedDB
-  '/templates/datastore/indexeddb/db.js': `// IndexedDB setup code will go here.
-console.log('IndexedDB module loaded.');`,
-};
-
 
 // Simple path resolver
 const resolvePath = (base: string, relative: string): string => {
@@ -217,24 +25,6 @@ const resolvePath = (base: string, relative: string): string => {
     const baseDir = base.endsWith('/') ? base : base.substring(0, base.lastIndexOf('/') + 1);
     const path = new URL(relative, `file://${baseDir}`).pathname;
     return path.startsWith('/') ? path : `/${path}`;
-};
-
-
-const getMimeType = (path: string): string => {
-    const extension = path.split('.').pop()?.toLowerCase();
-    switch (extension) {
-        case 'html': return 'text/html';
-        case 'css': return 'text/css';
-        case 'js': return 'application/javascript';
-        case 'json': return 'application/json';
-        case 'png': return 'image/png';
-        case 'jpg':
-        case 'jpeg': return 'image/jpeg';
-        case 'gif': return 'image/gif';
-        case 'svg': return 'image/svg+xml';
-        case 'md': return 'text/markdown';
-        default: return 'application/octet-stream';
-    }
 };
 
 interface OrchestratorPanelProps {
@@ -252,203 +42,50 @@ interface EditingElementInfo {
     selector?: string;
 }
 
-
 const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onToggleFocusMode }) => {
-  const [isDBLoading, setIsDBLoading] = useState(true);
-  
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const store = useStore();
+  const {
+    isDBLoading, loadStateFromDB, fileSystem, setFileSystem, chatHistory, addChatMessage,
+    terminalHistory, addTerminalLine, updateTerminalLine, terminalCwd, setTerminalCwd,
+    error, setError, panelSizes, setPanelSizes, previewRoot, setPreviewRoot,
+    openFiles, setOpenFiles, activeFile, setActiveFile, chatPanelHeight, setChatPanelHeight,
+    setGithubState, initialGithubFileSystem
+  } = store;
+
+  // Local UI state that doesn't need to be in the global store
   const [cliInput, setCliInput] = useState<string>('');
-  const [fileSystem, setFileSystem] = useState<FileSystemState>({});
-  const [previewRoot, setPreviewRoot] = useState<string | null>('/');
   const [srcDoc, setSrcDoc] = useState('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [error, setError] = useState<string>('');
-
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  
-  const [panelSizes, setPanelSizes] = useState<number[]>([25, 40, 35]);
-  const dragDividerIndex = useRef<number | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  const [openFiles, setOpenFiles] = useState<string[]>([]);
-  const [activeFile, setActiveFile] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'editor' | 'terminal'>('editor');
-
-
   const [refineInstruction, setRefineInstruction] = useState<string>('');
   const [isRefining, setIsRefining] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState(false);
-  
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [editingElementInfo, setEditingElementInfo] = useState<EditingElementInfo | null>(null);
-  
   const [aiHint, setAiHint] = useState<string>('');
   const [isHintLoading, setIsHintLoading] = useState<boolean>(false);
-  
-  const [chatPanelHeight, setChatPanelHeight] = useState<number>(250);
   const [isResizingChat, setIsResizingChat] = useState(false);
   const [isChatMaximized, setIsChatMaximized] = useState(false);
   const [isChatMinimized, setIsChatMinimized] = useState(false);
-  
-  const [fileSystemHistory, setFileSystemHistory] = useState<FileSystemState[]>([]);
-  const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1);
-  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<Date | null>(null);
-
-  // Terminal State
-  const [terminalHistory, setTerminalHistory] = useState<TerminalLine[]>([]);
-  const [terminalCwd, setTerminalCwd] = useState('/');
   const [isTerminalLoading, setIsTerminalLoading] = useState(false);
-
-  // GitHub State
-  const [githubToken, setGithubToken] = useState<string>('');
-  const [isGithubConnected, setIsGithubConnected] = useState<boolean>(false);
-  const [githubUser, setGithubUser] = useState<GithubUser | null>(null);
-  const [githubRepos, setGithubRepos] = useState<GithubRepo[]>([]);
-  const [selectedRepoFullName, setSelectedRepoFullName] = useState<string>('');
-  const [repoBranches, setRepoBranches] = useState<GithubBranch[]>([]);
-  const [selectedBranchName, setSelectedBranchName] = useState<string>('');
-  const [isLoadingFromGithub, setIsLoadingFromGithub] = useState<boolean>(false);
-  const [initialGithubFileSystem, setInitialGithubFileSystem] = useState<FileSystemState | null>(null);
-  const [changedFiles, setChangedFiles] = useState<FileChange[]>([]);
-
-  // State for the new code application modal
   const [pendingCodeChanges, setPendingCodeChanges] = useState<{ path: string; content: string }[] | null>(null);
-
-  // State for unpacking ZIP files
   const [pendingZip, setPendingZip] = useState<{ file: File; contents: ArrayBuffer } | null>(null);
 
-  const saveSnapshot = useCallback((fs: FileSystemState) => {
-      setFileSystemHistory(prev => {
-          const newHistory = prev.slice(0, currentHistoryIndex + 1);
-          newHistory.push(fs);
-          return newHistory;
-      });
-      setCurrentHistoryIndex(prev => prev + 1);
-  }, [currentHistoryIndex]);
+  // Refs
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const dragDividerIndex = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Load state from IndexedDB on initial render
   useEffect(() => {
-    const loadStateFromDB = async () => {
-        await dbService.initDB();
-        const savedState = await dbService.loadState();
-        if (savedState) {
-            setChatHistory(savedState.chatHistory || [{role: 'system', content: 'Session restored.'}]);
-            const loadedFs = savedState.fileSystem || initialFileSystem;
-            loadedFs['/README.md'] = readmeContent; // Ensure latest README
-            loadedFs['/templates/registry.json'] = templateRegistry; // Ensure latest registry
-            setFileSystem(loadedFs);
-            setPanelSizes(savedState.panelSizes || [25, 40, 35]);
-            setPreviewRoot(savedState.previewRoot || '/');
-            setOpenFiles(savedState.openFiles || ['/README.md', '/index.html']);
-            setActiveFile(savedState.activeFile || '/README.md');
-            setChatPanelHeight(savedState.chatPanelHeight || 250);
-            setGithubToken(savedState.githubToken || '');
-            setTerminalHistory(savedState.terminalHistory || []);
-            setTerminalCwd(savedState.terminalCwd || '/');
-            setLastSavedTimestamp(savedState.lastSavedTimestamp ? new Date(savedState.lastSavedTimestamp) : null);
-
-            setFileSystemHistory([loadedFs]);
-            setCurrentHistoryIndex(0);
-        } else {
-            setFileSystem(initialFileSystem);
-            setOpenFiles(['/README.md', '/index.html']);
-            setActiveFile('/README.md');
-            setChatHistory([{ role: 'system', content: `Welcome to the sandbox! I'm Lyra, your AI agent. Ask me to build something or try one of the suggestions.` }]);
-            setFileSystemHistory([initialFileSystem]);
-            setCurrentHistoryIndex(0);
-        }
-        setIsDBLoading(false);
-    };
-
     loadStateFromDB();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleSaveState = useCallback(async () => {
-    if (isDBLoading) return;
-    try {
-        const timestamp = new Date();
-        // This is a manual save, so we save everything at once.
-        await Promise.all([
-            dbService.saveItem('chatHistory', chatHistory),
-            dbService.saveItem('fileSystem', fileSystem),
-            dbService.saveItem('panelSizes', panelSizes),
-            dbService.saveItem('previewRoot', previewRoot),
-            dbService.saveItem('openFiles', openFiles),
-            dbService.saveItem('activeFile', activeFile),
-            dbService.saveItem('chatPanelHeight', chatPanelHeight),
-            dbService.saveItem('githubToken', githubToken),
-            dbService.saveItem('terminalHistory', terminalHistory),
-            dbService.saveItem('terminalCwd', terminalCwd),
-            dbService.saveItem('lastSavedTimestamp', timestamp),
-        ]);
-        setLastSavedTimestamp(timestamp);
-    } catch (error) {
-        console.error("Failed to save state manually:", error);
-        setError("Could not save session. Changes may be lost.");
-    }
-  }, [isDBLoading, chatHistory, fileSystem, panelSizes, previewRoot, openFiles, activeFile, chatPanelHeight, githubToken, terminalHistory, terminalCwd]);
-  
-  // Granular, debounced auto-saving for performance
-  const updateTimestamp = useCallback(() => {
-    const now = new Date();
-    dbService.saveItem('lastSavedTimestamp', now);
-    setLastSavedTimestamp(now);
-  }, []);
-
-  // Effect for fileSystem
-  useEffect(() => {
-    if (isDBLoading) return;
-    const handler = setTimeout(() => {
-        dbService.saveItem('fileSystem', fileSystem).then(updateTimestamp);
-    }, 2000);
-    return () => clearTimeout(handler);
-  }, [fileSystem, isDBLoading, updateTimestamp]);
-
-  // Effect for chatHistory
-  useEffect(() => {
-    if (isDBLoading) return;
-    const handler = setTimeout(() => {
-        dbService.saveItem('chatHistory', chatHistory).then(updateTimestamp);
-    }, 2000);
-    return () => clearTimeout(handler);
-  }, [chatHistory, isDBLoading, updateTimestamp]);
-
-  // Effect for terminal state
-  useEffect(() => {
-    if (isDBLoading) return;
-    const handler = setTimeout(() => {
-        dbService.saveItem('terminalHistory', terminalHistory).then(updateTimestamp);
-        dbService.saveItem('terminalCwd', terminalCwd).then(updateTimestamp);
-    }, 2000);
-    return () => clearTimeout(handler);
-  }, [terminalHistory, terminalCwd, isDBLoading, updateTimestamp]);
-
-  // Effect for UI layout state
-  const uiState = useMemo(() => ({
-    panelSizes, previewRoot, openFiles, activeFile, chatPanelHeight, githubToken
-  }), [panelSizes, previewRoot, openFiles, activeFile, chatPanelHeight, githubToken]);
-
-  useEffect(() => {
-    if (isDBLoading) return;
-    const handler = setTimeout(() => {
-        Object.entries(uiState).forEach(([key, value]) => {
-            dbService.saveItem(key, value);
-        });
-        updateTimestamp();
-    }, 2000);
-    return () => clearTimeout(handler);
-  }, [uiState, isDBLoading, updateTimestamp]);
-
+  }, [loadStateFromDB]);
 
   useEffect(() => {
     const handleMouseUp = () => {
         dragDividerIndex.current = null;
     };
-    const handleMouseLeave = () => {
-        dragDividerIndex.current = null;
-    }
     
     const handleMouseMove = (e: MouseEvent) => {
         if (dragDividerIndex.current === null) return;
@@ -479,7 +116,6 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         setPanelSizes(newPanelSizes);
     };
 
-
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
     
@@ -487,7 +123,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [panelSizes]);
+  }, [panelSizes, setPanelSizes]);
 
   useEffect(() => {
         if (chatContainerRef.current) {
@@ -506,7 +142,6 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
     const readmeMdPath = `${basePath}README.md`;
     const indexMdPath = `${basePath}index.md`;
     
-    // Check for common script entry points
     const scriptFilePaths = [
         `${basePath}index.tsx`, `${basePath}index.jsx`, `${basePath}App.tsx`,
         `${basePath}App.jsx`, `${basePath}main.tsx`, `${basePath}main.jsx`,
@@ -829,7 +464,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
   const handleFileSelect = (path: string) => {
       setActiveFile(path);
       if (!openFiles.includes(path)) {
-          setOpenFiles(prev => [...prev, path]);
+          setOpenFiles([...openFiles, path]);
       }
       setActiveTab('editor');
   };
@@ -844,25 +479,19 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
     if (!pendingCodeChanges) return;
 
     if (decision.action === 'apply') {
-        setFileSystem(prevFs => {
-            const newFs = { ...prevFs };
-            pendingCodeChanges.forEach(({ path, content }) => {
-                newFs[path] = content;
-            });
-            saveSnapshot(newFs);
-            return newFs;
+        const newFs = { ...fileSystem };
+        pendingCodeChanges.forEach(({ path, content }) => {
+            newFs[path] = content;
         });
+        setFileSystem(newFs, true);
         // Select the first modified file
         handleFileSelect(pendingCodeChanges[0].path);
     } else if (decision.action === 'save_as') {
         const { newPath } = decision;
         const content = pendingCodeChanges[0].content; // We've ensured there's only one
 
-        setFileSystem(prevFs => {
-            const newFs = { ...prevFs, [newPath]: content };
-            saveSnapshot(newFs);
-            return newFs;
-        });
+        const newFs = { ...fileSystem, [newPath]: content };
+        setFileSystem(newFs, true);
         // Select the new file
         handleFileSelect(newPath);
     }
@@ -875,11 +504,8 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
       alert("File already exists at this path.");
       return;
     }
-    setFileSystem(prevFs => {
-      const newFs = { ...prevFs, [path]: '' };
-      saveSnapshot(newFs);
-      return newFs;
-    });
+    const newFs = { ...fileSystem, [path]: '' };
+    setFileSystem(newFs, true);
     handleFileSelect(path);
   };
 
@@ -889,11 +515,8 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
       alert("Folder already exists at this path.");
       return;
     }
-    setFileSystem(prevFs => {
-      const newFs = { ...prevFs, [placeholder]: '' };
-      saveSnapshot(newFs);
-      return newFs;
-    });
+    const newFs = { ...fileSystem, [placeholder]: '' };
+    setFileSystem(newFs, true);
   };
 
   const handleFileUpload = async (files: FileList) => {
@@ -921,11 +544,8 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
 
     // Apply non-ZIP file updates if any were processed
     if (Object.keys(nonZipFsUpdates).length > 0) {
-        setFileSystem(prevFs => {
-            const newFs = { ...prevFs, ...nonZipFsUpdates };
-            saveSnapshot(newFs);
-            return newFs;
-        });
+        const newFs = { ...fileSystem, ...nonZipFsUpdates };
+        setFileSystem(newFs, true);
     }
   };
   
@@ -968,13 +588,10 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
             }
         }
 
-        setFileSystem(prevFs => {
-            const newFs = { ...prevFs, ...newFileUpdates };
-            saveSnapshot(newFs);
-            return newFs;
-        });
+        const newFs = { ...fileSystem, ...newFileUpdates };
+        setFileSystem(newFs, true);
         
-        setChatHistory(prev => [...prev, { role: 'system', content: `Successfully unpacked ${fileList.length} files from ${pendingZip.file.name} to ${cleanDestinationPath || '/'}.` }]);
+        addChatMessage({ role: 'system', content: `Successfully unpacked ${fileList.length} files from ${pendingZip.file.name} to ${cleanDestinationPath || '/'}.` });
         
         // Trigger AI interaction
         const aiPrompt = `I just uploaded and unpacked a zip file named "${pendingZip.file.name}" into the \`${cleanDestinationPath || '/'}\` directory. The unpacked files are: ${fileList.slice(0, 10).join(', ')}${fileList.length > 10 ? '...' : ''}. Can you analyze these new files, tell me what this project is about, and suggest the first step to get it running or explore it further?`;
@@ -987,7 +604,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
     } catch (e) {
         const errorMsg = e instanceof Error ? e.message : "An unknown error occurred.";
         setError(`Failed to unpack ZIP file: ${errorMsg}`);
-        setChatHistory(prev => [...prev, { role: 'system', content: `Error unpacking ${pendingZip!.file.name}: ${errorMsg}` }]);
+        addChatMessage({ role: 'system', content: `Error unpacking ${pendingZip!.file.name}: ${errorMsg}` });
     } finally {
         setPendingZip(null); // Close modal
         // Loading state will be managed by handleChatSubmit now
@@ -996,8 +613,9 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
 
   const handleDownloadProject = () => {
     const zip = new JSZip();
-    Object.entries(fileSystem).forEach(([path, content]) => {
+    Object.keys(fileSystem).forEach(path => {
       if (path.endsWith('/.placeholder')) return;
+      const content = fileSystem[path];
       zip.file(path.substring(1), content);
     });
     zip.generateAsync({ type: 'blob' }).then(content => {
@@ -1018,11 +636,8 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         const currentContent = fileSystem[activeFile] || '';
         const language = activeFile.split('.').pop() || 'text';
         const newContent = await refineCodeWithAgent(currentContent, language, refineInstruction);
-        setFileSystem(prevFs => {
-            const newFs = { ...prevFs, [activeFile]: newContent };
-            saveSnapshot(newFs);
-            return newFs;
-        });
+        const newFs = { ...fileSystem, [activeFile]: newContent };
+        setFileSystem(newFs, true);
         setRefineInstruction('');
     } catch (e) {
         if (e instanceof Error) {
@@ -1037,86 +652,76 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
 
   const handleInlineSave = (newHtml: string, elementId: string) => {
      const selector = editingElementInfo?.selector;
+     
+     if (!previewRoot) return;
+     const basePath = previewRoot === '/' ? '/' : (previewRoot.endsWith('/') ? previewRoot : `${previewRoot}/`);
+     const htmlPath = `${basePath}index.html`;
 
-     setFileSystem(prevFs => {
-        if (!previewRoot) return prevFs;
-        const basePath = previewRoot === '/' ? '/' : (previewRoot.endsWith('/') ? previewRoot : `${previewRoot}/`);
-        const htmlPath = `${basePath}index.html`;
+     const content = fileSystem[htmlPath];
+     if (!content) return;
 
-        const content = prevFs[htmlPath];
-        if (!content) return prevFs;
+     const doc = new DOMParser().parseFromString(content, 'text/html');
+     let element: Element | null = null;
+     
+     try {
+         if (selector) {
+             element = doc.querySelector(selector);
+         } else {
+             element = doc.querySelector(`[data-editable-id="${elementId}"]`);
+         }
+     } catch (e) {
+         console.error("Failed to select element for inline editing:", e);
+         setEditingElementInfo(null);
+         return;
+     }
 
-        const doc = new DOMParser().parseFromString(content, 'text/html');
-        let element: Element | null = null;
-        
-        try {
-            if (selector) {
-                element = doc.querySelector(selector);
-            } else {
-                element = doc.querySelector(`[data-editable-id="${elementId}"]`);
-            }
-        } catch (e) {
-            console.error("Failed to select element for inline editing:", e);
-            return prevFs;
-        }
+     if (element) {
+         const tempWrapper = doc.createElement('div');
+         tempWrapper.innerHTML = newHtml;
+         const newElement = tempWrapper.firstChild;
+         if (newElement) {
+            element.replaceWith(newElement);
+            const newFileContent = `<!DOCTYPE html>\n` + doc.documentElement.outerHTML;
+            const newFs = { ...fileSystem, [htmlPath]: newFileContent };
+            setFileSystem(newFs, true);
+         }
+     } else {
+         console.warn(`Could not find element to save. Selector: ${selector}, ID: ${elementId}`);
+     }
 
-        if (element) {
-            const tempWrapper = doc.createElement('div');
-            tempWrapper.innerHTML = newHtml;
-            const newElement = tempWrapper.firstChild;
-            if (newElement) {
-               element.replaceWith(newElement);
-               const newFileContent = `<!DOCTYPE html>\n` + doc.documentElement.outerHTML;
-               const newFs = { ...prevFs, [htmlPath]: newFileContent };
-               saveSnapshot(newFs);
-               return newFs;
-            }
-        } else {
-            console.warn(`Could not find element to save. Selector: ${selector}, ID: ${elementId}`);
-        }
-
-        return prevFs;
-     });
      setEditingElementInfo(null);
   };
 
   const handleTerminalSubmit = async (command: string) => {
     const commandId = uuidv4();
     const newHistoryLine: TerminalLine = { id: commandId, command, cwd: terminalCwd };
-    setTerminalHistory(prev => [...prev, newHistoryLine]);
+    addTerminalLine(newHistoryLine);
     setIsTerminalLoading(true);
 
     try {
         const result = await runCommandInTerminal(command, terminalCwd, fileSystem);
         
-        setTerminalHistory(prev => prev.map(line => 
-            line.id === commandId ? { ...line, stdout: result.stdout, stderr: result.stderr } : line
-        ));
+        updateTerminalLine({ id: commandId, stdout: result.stdout, stderr: result.stderr });
         setTerminalCwd(result.newCurrentDirectory);
 
         if (result.fileSystemChanges && result.fileSystemChanges.length > 0) {
-            setFileSystem(prevFs => {
-                let newFs = { ...prevFs };
-                result.fileSystemChanges.forEach(change => {
-                    switch (change.action) {
-                        case 'create':
-                        case 'update':
-                            newFs[change.path] = change.content || '';
-                            break;
-                        case 'delete':
-                            delete newFs[change.path];
-                            break;
-                    }
-                });
-                saveSnapshot(newFs);
-                return newFs;
+            let newFs = { ...fileSystem };
+            result.fileSystemChanges.forEach(change => {
+                switch (change.action) {
+                    case 'create':
+                    case 'update':
+                        newFs[change.path] = change.content || '';
+                        break;
+                    case 'delete':
+                        delete newFs[change.path];
+                        break;
+                }
             });
+            setFileSystem(newFs, true);
         }
     } catch (e) {
         const errorMsg = e instanceof Error ? e.message : 'An unknown error occurred.';
-        setTerminalHistory(prev => prev.map(line =>
-            line.id === commandId ? { ...line, stderr: `Execution failed: ${errorMsg}` } : line
-        ));
+        updateTerminalLine({ id: commandId, stderr: `Execution failed: ${errorMsg}` });
     } finally {
         setIsTerminalLoading(false);
     }
@@ -1127,13 +732,15 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
       setIsLoading(true);
       try {
           const user = await githubService.connectToGithub(token);
-          setGithubUser(user);
-          setIsGithubConnected(true);
           const repos = await githubService.listRepos();
-          setGithubRepos(repos);
+          setGithubState({
+              isGithubConnected: true,
+              githubUser: user,
+              githubRepos: repos,
+          });
       } catch (e: any) {
           setError(e.message);
-          setGithubToken('');
+          store.setGithubToken('');
           githubService.disconnectFromGithub();
       } finally {
           setIsLoading(false);
@@ -1142,28 +749,28 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
 
   const handleGithubDisconnect = () => {
       githubService.disconnectFromGithub();
-      setGithubToken('');
-      setIsGithubConnected(false);
-      setGithubUser(null);
-      setGithubRepos([]);
-      setSelectedRepoFullName('');
-      setRepoBranches([]);
-      setSelectedBranchName('');
-      setInitialGithubFileSystem(null);
-      setChangedFiles([]);
+      store.setGithubToken('');
+      setGithubState({
+        isGithubConnected: false,
+        githubUser: null,
+        githubRepos: [],
+        selectedRepoFullName: '',
+        repoBranches: [],
+        selectedBranchName: '',
+        initialGithubFileSystem: null,
+        changedFiles: [],
+      });
   };
 
   const handleRepoSelected = async (repoFullName: string) => {
-    setSelectedRepoFullName(repoFullName);
-    setSelectedBranchName('');
-    setRepoBranches([]);
+    setGithubState({ selectedRepoFullName: repoFullName, selectedBranchName: '', repoBranches: [] });
     if (repoFullName) {
         setIsLoading(true);
         setError('');
         try {
             const [owner, repo] = repoFullName.split('/');
             const branches = await githubService.listBranches(owner, repo);
-            setRepoBranches(branches);
+            setGithubState({ repoBranches: branches });
         } catch (e: any) {
             setError(e.message);
         } finally {
@@ -1173,48 +780,45 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
   };
   
   const handleLoadRepo = async () => {
-    if (!selectedRepoFullName || !selectedBranchName) return;
-    setIsLoadingFromGithub(true);
+    if (!store.selectedRepoFullName || !store.selectedBranchName) return;
+    setGithubState({ isLoadingFromGithub: true });
     setIsLoading(true);
     setLoadingMessage('Loading repository from GitHub...');
     setError('');
     try {
-        const [owner, repo] = selectedRepoFullName.split('/');
-        const fs = await githubService.getRepoContents(owner, repo, selectedBranchName);
-        setFileSystem(fs);
-        setInitialGithubFileSystem(fs);
-        setChangedFiles([]);
+        const [owner, repo] = store.selectedRepoFullName.split('/');
+        const fs = await githubService.getRepoContents(owner, repo, store.selectedBranchName);
+        setFileSystem(fs, true);
+        setGithubState({ initialGithubFileSystem: fs, changedFiles: [] });
         setOpenFiles(['/README.md', '/index.html'].filter(f => f in fs));
         setActiveFile(Object.keys(fs).includes('/README.md') ? '/README.md' : (Object.keys(fs)[0] || null));
         setPreviewRoot('/');
-        saveSnapshot(fs);
     } catch(e: any) {
         setError(`Failed to load repo: ${e.message}`);
     } finally {
-        setIsLoadingFromGithub(false);
+        setGithubState({ isLoadingFromGithub: false });
         setIsLoading(false);
         setLoadingMessage('');
     }
   };
   
   const handleCommitAndPush = async (message: string) => {
-      if (!selectedRepoFullName || !selectedBranchName || !initialGithubFileSystem) return;
+      if (!store.selectedRepoFullName || !store.selectedBranchName || !initialGithubFileSystem) return;
       setIsLoading(true);
       setLoadingMessage('Committing and pushing to GitHub...');
       setError('');
       try {
-          const [owner, repo] = selectedRepoFullName.split('/');
+          const [owner, repo] = store.selectedRepoFullName.split('/');
           const commitUrl = await githubService.commitAndPush({
               owner,
               repo,
-              branch: selectedBranchName,
+              branch: store.selectedBranchName,
               message,
-              changes: changedFiles,
+              changes: store.changedFiles,
               currentFileSystem: fileSystem,
               initialFileSystem: initialGithubFileSystem
           });
-          setInitialGithubFileSystem(fileSystem);
-          setChangedFiles([]);
+          setGithubState({ initialGithubFileSystem: fileSystem, changedFiles: [] });
           alert(`Successfully pushed to GitHub! Commit URL: ${commitUrl}`);
       } catch (e: any) {
           setError(`Commit failed: ${e.message}`);
@@ -1223,30 +827,6 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
           setLoadingMessage('');
       }
   };
-
-  useEffect(() => {
-    if (!initialGithubFileSystem) {
-        setChangedFiles([]);
-        return;
-    }
-    const changes: FileChange[] = [];
-    const allPaths = new Set([...Object.keys(initialGithubFileSystem), ...Object.keys(fileSystem)]);
-    
-    allPaths.forEach(path => {
-        const initialContent = initialGithubFileSystem[path];
-        const currentContent = fileSystem[path];
-
-        if (initialContent === undefined && currentContent !== undefined) {
-            changes.push({ path, status: 'added' });
-        } else if (initialContent !== undefined && currentContent === undefined) {
-            changes.push({ path, status: 'deleted' });
-        } else if (initialContent !== currentContent) {
-            changes.push({ path, status: 'modified' });
-        }
-    });
-
-    setChangedFiles(changes.filter(c => !c.path.endsWith('/.placeholder')));
-  }, [fileSystem, initialGithubFileSystem]);
   
   const handleChatSubmit = async (e: React.FormEvent, prompt?: string) => {
         if(e) e.preventDefault();
@@ -1254,8 +834,8 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         if (!userInput.trim() || isLoading) return;
 
         const newUserMessage: ChatMessage = { role: 'user', content: userInput };
+        addChatMessage(newUserMessage);
         const newHistory = [...chatHistory, newUserMessage];
-        setChatHistory(newHistory);
         setCliInput('');
         setIsLoading(true);
         setLoadingMessage('Lyra is thinking...');
@@ -1272,13 +852,11 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
                 code: result.code,
                 suggestions: result.suggestions,
             };
-            
-            setChatHistory(prev => [...prev, modelMessage]);
+            addChatMessage(modelMessage);
 
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
             setError(`Agent Error: ${errorMessage}`);
-            setChatHistory(chatHistory);
         } finally {
             setIsLoading(false);
             setLoadingMessage('');
@@ -1353,7 +931,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
                   <div className="flex items-center gap-2 mb-2">
                     {aiHint && !isHintLoading && (
                       <button onClick={(e) => { setCliInput(aiHint); handleChatSubmit(e as any, aiHint); }} className="flex items-center gap-2 text-xs text-left px-3 py-1.5 bg-black/30 hover:bg-black/40 border border-[var(--card-border)] rounded-full transition-colors text-gray-300 hover:text-white">
-                        <LightbulbIcon className="h-4 w-4 text-[var(--neon-yellow)]" />
+                        <LightbulbIcon className="h-4 w-4 text-yellow-400" />
                         <span>{aiHint}</span>
                       </button>
                     )}
@@ -1393,7 +971,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         onMouseLeave={() => setIsResizingChat(false)}
         onMouseMove={e => {
             if (isResizingChat) {
-                setChatPanelHeight(p => Math.max(150, document.body.clientHeight - e.clientY));
+                setChatPanelHeight(e.clientY > 150 ? e.clientY : 150);
             }
         }}
       >
@@ -1413,39 +991,26 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
                           onNewFile={handleNewFile}
                           onNewFolder={handleNewFolder}
                           onFileUpload={handleFileUpload}
-                          onSetPreviewRoot={path => setPreviewRoot(path)}
+                          onSetPreviewRoot={setPreviewRoot}
                           onDownloadProject={handleDownloadProject}
                           onRefresh={updatePreview}
                       />
                   </CollapsibleSection>
                   <CollapsibleSection title="GitHub">
                       <GithubPanel
-                        isConnected={isGithubConnected}
-                        user={githubUser}
-                        repos={githubRepos}
-                        branches={repoBranches}
-                        selectedRepo={selectedRepoFullName}
-                        selectedBranch={selectedBranchName}
-                        changedFiles={changedFiles}
-                        isLoading={isLoading || isLoadingFromGithub}
-                        error={error}
+                        isLoading={isLoading || store.isLoadingFromGithub}
                         onConnect={handleGithubConnect}
                         onDisconnect={handleGithubDisconnect}
                         onRepoSelected={handleRepoSelected}
-                        onBranchSelected={setSelectedBranchName}
+                        onBranchSelected={(branch) => setGithubState({ selectedBranchName: branch })}
                         onLoadRepo={handleLoadRepo}
                         onCommit={handleCommitAndPush}
-                        initialToken={githubToken}
-                        onTokenChange={setGithubToken}
                       />
                   </CollapsibleSection>
                   <CollapsibleSection title="System Operator">
                     <SystemOperatorPanel
                         fileSystem={fileSystem}
-                        onUpdateFileSystem={(newFs, snapshot) => {
-                          setFileSystem(newFs);
-                          if(snapshot) saveSnapshot(newFs);
-                        }}
+                        onUpdateFileSystem={(newFs, snapshot) => setFileSystem(newFs, snapshot)}
                         onRunCommand={handleTerminalSubmit}
                         onDebug={(context) => handleChatSubmit(new Event('submit') as any, `The last command in my container failed. Here is the context, please help me debug it: ${context}`)}
                     />
@@ -1524,8 +1089,8 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
                               <CodeEditor
                                   value={fileSystem[activeFile] || ''}
                                   language={activeFile.split('.').pop() || 'markdown'}
-                                  onChange={(newCode) => setFileSystem(fs => ({ ...fs, [activeFile]: newCode }))}
-                                  onSave={() => handleSaveState()}
+                                  onChange={(newCode) => setFileSystem({ ...fileSystem, [activeFile]: newCode }, false)}
+                                  onSave={() => useStore.getState().saveState()}
                               />
                             </>
                           ) : (
@@ -1597,7 +1162,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         </div>
       </div>
       
-      {!isFocusMode && <OrbMenu onSave={handleSaveState} lastSavedTimestamp={lastSavedTimestamp} onToggleFocusMode={onToggleFocusMode} />}
+      {!isFocusMode && <OrbMenu onToggleFocusMode={onToggleFocusMode} />}
 
       {pendingCodeChanges && (
         <ApplyChangesModal

@@ -1,22 +1,8 @@
-import type { FileSystemState, ChatMessage, TerminalLine } from '../types';
+import type { StoreState } from '../store';
 
 const DB_NAME = 'LiveDevSandboxDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'sandboxState';
-
-export interface AppState {
-    chatHistory: ChatMessage[];
-    fileSystem: FileSystemState;
-    panelSizes: number[];
-    previewRoot: string | null;
-    openFiles: string[];
-    activeFile: string | null;
-    chatPanelHeight: number;
-    githubToken: string;
-    terminalHistory: TerminalLine[];
-    terminalCwd: string;
-    lastSavedTimestamp: Date;
-}
 
 class IndexedDBService {
     private db: IDBDatabase | null = null;
@@ -73,7 +59,7 @@ class IndexedDBService {
         });
     }
 
-    public loadState(): Promise<Partial<AppState> | null> {
+    public loadState(): Promise<Partial<Omit<StoreState, 'actions'>> | null> {
         return new Promise((resolve, reject) => {
             if (!this.db) {
                 reject('DB not initialized.');
@@ -91,7 +77,7 @@ class IndexedDBService {
                 };
                 
                 getAllKeysReq.onsuccess = () => {
-                    const keys = getAllKeysReq.result as (keyof AppState)[];
+                    const keys = getAllKeysReq.result as (keyof StoreState)[];
                     if (!keys || keys.length === 0) {
                         return resolve(null);
                     }
@@ -105,7 +91,7 @@ class IndexedDBService {
 
                     getAllValuesReq.onsuccess = () => {
                         const values = getAllValuesReq.result;
-                        const state: Partial<AppState> = {};
+                        const state: Partial<StoreState> = {};
                         keys.forEach((key, index) => {
                             (state as any)[key] = values[index];
                         });

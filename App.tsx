@@ -48,7 +48,9 @@ const App: React.FC<AppProps> = () => {
               </a>
               <h1 className="text-2xl font-bold tracking-wider" style={{textShadow: '0 0 5px var(--neon-purple)'}}>AIONEX Sandbox</h1>
             </div>
-            {/* Settings have been removed as API keys are now handled by environment variables. */}
+            <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+              Click Me
+            </button>
           </header>
         )}
         
