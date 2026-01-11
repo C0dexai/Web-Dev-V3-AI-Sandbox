@@ -1,168 +1,186 @@
 import { Octokit } from 'octokit';
-import type { FileSystemState, GithubRepo, GithubBranch, GithubUser, FileChange } from '../types';
+import type { FileSystemState, GithubRepo, GithubBranch, GithubUser, FileChange, TreeItem } from '../types';
 
-let octokit: Octokit | null = null;
+class GithubService {
+    private octokit: Octokit | null = null;
+    private repoCache: GithubRepo[] | null = null;
+    private branchCache: Map<string, GithubBranch[]> = new Map();
 
-export const connectToGithub = async (token: string): Promise<GithubUser> => {
-    octokit = new Octokit({ auth: token });
-    try {
-        const { data: user } = await octokit.rest.users.getAuthenticated();
-        return user;
-    } catch (error) {
-        octokit = null;
-        console.error("GitHub connection failed:", error);
-        throw new Error("Failed to connect to GitHub. Please check your token and permissions.");
-    }
-};
-
-export const disconnectFromGithub = () => {
-    octokit = null;
-};
-
-export const listRepos = async (): Promise<GithubRepo[]> => {
-    if (!octokit) throw new Error("Not connected to GitHub.");
-    const { data: repos } = await octokit.rest.repos.listForAuthenticatedUser({
-        type: 'owner',
-        sort: 'pushed',
-        per_page: 100,
-    });
-    return repos as GithubRepo[];
-};
-
-export const listBranches = async (owner: string, repo: string): Promise<GithubBranch[]> => {
-    if (!octokit) throw new Error("Not connected to GitHub.");
-    const { data: branches } = await octokit.rest.repos.listBranches({
-        owner,
-        repo,
-        per_page: 100,
-    });
-    return branches;
-};
-
-
-export const getRepoContents = async (owner: string, repo: string, ref: string): Promise<FileSystemState> => {
-    if (!octokit) throw new Error("Not connected to GitHub.");
-    
-    const { data: tree } = await octokit.rest.git.getTree({
-        owner,
-        repo,
-        tree_sha: ref,
-        recursive: '1',
-    });
-
-    const fileSystem: FileSystemState = {};
-    const textFilePromises = tree.tree
-        .filter(item => item.type === 'blob' && item.path)
-        .map(async (file) => {
-            try {
-                const { data: blob } = await octokit!.rest.git.getBlob({
-                    owner,
-                    repo,
-                    file_sha: file.sha!,
-                });
-
-                // Check if content is base64 and decode if so
-                if (blob.encoding === 'base64') {
-                    const content = atob(blob.content);
-                    // A simple check to see if the content is likely text
-                    // This avoids trying to display binary files like images
-                    if (/^[\x00-\x7F]*$/.test(content)) {
-                       fileSystem[`/${file.path!}`] = content;
-                    } else {
-                       console.warn(`Skipping binary file: /${file.path!}`)
-                    }
-                } else {
-                     fileSystem[`/${file.path!}`] = blob.content;
-                }
-                
-            } catch (err) {
-                console.error(`Failed to fetch blob for ${file.path}:`, err);
+    connect = async (token: string): Promise<GithubUser> => {
+        this.octokit = new Octokit({ auth: token });
+        try {
+            const { data: user } = await this.octokit.rest.users.getAuthenticated();
+            this.clearCache();
+            return user;
+        } catch (error) {
+            this.disconnect();
+            console.error("GitHub connection failed:", error);
+            if (error instanceof Error && 'status' in error && error.status === 401) {
+                throw new Error("Authentication failed. Please check your token and permissions.");
             }
-        });
+            throw new Error("Failed to connect to GitHub.");
+        }
+    };
 
-    await Promise.all(textFilePromises);
-    return fileSystem;
-};
+    disconnect = () => {
+        this.octokit = null;
+        this.clearCache();
+    };
 
-interface CommitDetails {
-    owner: string;
-    repo: string;
-    branch: string;
-    message: string;
-    changes: FileChange[];
-    currentFileSystem: FileSystemState;
-    initialFileSystem: FileSystemState;
+    private clearCache = () => {
+        this.repoCache = null;
+        this.branchCache.clear();
+    };
+    
+    listRepos = async (): Promise<GithubRepo[]> => {
+        if (!this.octokit) throw new Error("Not connected to GitHub.");
+        if (this.repoCache) return this.repoCache;
+
+        try {
+            const { data: repos } = await this.octokit.rest.repos.listForAuthenticatedUser({
+                type: 'owner',
+                sort: 'pushed',
+                per_page: 100,
+            });
+            this.repoCache = repos as GithubRepo[];
+            return this.repoCache;
+        } catch (error) {
+            console.error("Failed to list repositories:", error);
+            throw new Error("Could not retrieve repositories.");
+        }
+    };
+
+    listBranches = async (owner: string, repo: string): Promise<GithubBranch[]> => {
+        if (!this.octokit) throw new Error("Not connected to GitHub.");
+        const cacheKey = `${owner}/${repo}`;
+        if (this.branchCache.has(cacheKey)) {
+            return this.branchCache.get(cacheKey)!;
+        }
+
+        try {
+            const { data: branches } = await this.octokit.rest.repos.listBranches({
+                owner,
+                repo,
+                per_page: 100,
+            });
+            this.branchCache.set(cacheKey, branches);
+            return branches;
+        } catch (error) {
+            console.error(`Failed to list branches for ${owner}/${repo}:`, error);
+            throw new Error("Could not retrieve branches for the selected repository.");
+        }
+    };
+
+    getRepoTree = async (owner: string, repo: string, ref: string): Promise<TreeItem[]> => {
+        if (!this.octokit) throw new Error("Not connected to GitHub.");
+        try {
+            const { data } = await this.octokit.rest.git.getTree({
+                owner,
+                repo,
+                tree_sha: ref,
+                recursive: '1',
+            });
+            return data.tree.filter(item => item.type === 'blob' && item.path) as TreeItem[];
+        } catch (error) {
+            console.error(`Failed to get repository tree for ${owner}/${repo}#${ref}:`, error);
+            throw new Error("Could not retrieve the repository file structure.");
+        }
+    };
+
+    getFileContent = async (owner: string, repo: string, fileSha: string): Promise<string> => {
+        if (!this.octokit) throw new Error("Not connected to GitHub.");
+        try {
+            const { data: blob } = await this.octokit.rest.git.getBlob({
+                owner,
+                repo,
+                file_sha: fileSha,
+            });
+
+            if (blob.encoding === 'base64') {
+                return atob(blob.content);
+            }
+            return blob.content;
+        } catch (error) {
+            console.error(`Failed to fetch blob for sha ${fileSha}:`, error);
+            throw new Error("Could not retrieve file content.");
+        }
+    };
+    
+    commitAndPush = async (
+        owner: string,
+        repo: string,
+        branch: string,
+        message: string,
+        changes: FileChange[],
+        currentFileSystem: FileSystemState
+    ): Promise<string> => {
+        if (!this.octokit) throw new Error("Not connected to GitHub.");
+
+        try {
+            const { data: branchData } = await this.octokit.rest.repos.getBranch({
+                owner,
+                repo,
+                branch,
+            });
+            const latestCommitSha = branchData.commit.sha;
+            const baseTreeSha = branchData.commit.commit.tree.sha;
+
+            const treeItems = await Promise.all(
+                changes.map(async (change) => {
+                    if (change.status === 'added' || change.status === 'modified') {
+                        const content = currentFileSystem[change.path];
+                        const { data: blob } = await this.octokit!.rest.git.createBlob({
+                            owner,
+                            repo,
+                            content,
+                            encoding: 'utf-8',
+                        });
+                        return {
+                            path: change.path.substring(1),
+                            sha: blob.sha,
+                            mode: '100644' as const,
+                            type: 'blob' as const,
+                        };
+                    } else { // deleted
+                        return {
+                            path: change.path.substring(1),
+                            sha: null, // This is how you delete a file in the Git tree
+                            mode: '100644' as const,
+                            type: 'blob' as const,
+                        };
+                    }
+                })
+            );
+
+            const { data: newTree } = await this.octokit.rest.git.createTree({
+                owner,
+                repo,
+                base_tree: baseTreeSha,
+                tree: treeItems,
+            });
+
+            const { data: newCommit } = await this.octokit.rest.git.createCommit({
+                owner,
+                repo,
+                message,
+                tree: newTree.sha,
+                parents: [latestCommitSha],
+            });
+
+            await this.octokit.rest.git.updateRef({
+                owner,
+                repo,
+                ref: `heads/${branch}`,
+                sha: newCommit.sha,
+            });
+
+            return newCommit.html_url || '';
+        } catch (error) {
+            console.error("Commit and push failed:", error);
+            throw new Error("Failed to commit and push changes. Please check your permissions and the repository state.");
+        }
+    };
 }
 
-export const commitAndPush = async ({ owner, repo, branch, message, changes, currentFileSystem, initialFileSystem }: CommitDetails): Promise<string> => {
-    if (!octokit) throw new Error("Not connected to GitHub.");
-
-    // 1. Get the latest commit SHA of the branch
-    const { data: branchData } = await octokit.rest.repos.getBranch({
-        owner,
-        repo,
-        branch,
-    });
-    const latestCommitSha = branchData.commit.sha;
-    const baseTreeSha = branchData.commit.commit.tree.sha;
-
-    // 2. Create blobs for new/modified files
-    const fileBlobs = await Promise.all(
-        changes
-            .filter(c => c.status === 'added' || c.status === 'modified')
-            .map(async (change) => {
-                const content = currentFileSystem[change.path];
-                const { data: blob } = await octokit!.rest.git.createBlob({
-                    owner,
-                    repo,
-                    content,
-                    encoding: 'utf-8',
-                });
-                return {
-                    path: change.path.substring(1), // remove leading slash
-                    sha: blob.sha,
-                    mode: '100644' as const,
-                    type: 'blob' as const,
-                };
-            })
-    );
-    
-    const treeItems = [
-        ...fileBlobs,
-        ...changes
-            .filter(c => c.status === 'deleted')
-            .map(change => ({
-                path: change.path.substring(1), // remove leading slash
-                sha: null, // Deleting file
-                mode: '100644' as const,
-                type: 'blob' as const,
-            }))
-    ];
-
-    // 3. Create a new tree with these changes
-    const { data: newTree } = await octokit.rest.git.createTree({
-        owner,
-        repo,
-        base_tree: baseTreeSha,
-        tree: treeItems,
-    });
-
-    // 4. Create a new commit pointing to the new tree
-    const { data: newCommit } = await octokit.rest.git.createCommit({
-        owner,
-        repo,
-        message,
-        tree: newTree.sha,
-        parents: [latestCommitSha],
-    });
-
-    // 5. Update the branch reference to point to the new commit
-    await octokit.rest.git.updateRef({
-        owner,
-        repo,
-        ref: `heads/${branch}`,
-        sha: newCommit.sha,
-    });
-
-    return newCommit.html_url || '';
-};
+const githubService = new GithubService();
+export default githubService;
