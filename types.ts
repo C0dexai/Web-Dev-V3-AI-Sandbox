@@ -1,11 +1,17 @@
-export type FileSystemState = Record<string, string>;
+export type FileSystemState = Record<string, string | null>;
+
+export interface TreeItem {
+    path: string;
+    sha: string;
+    type: 'blob' | 'tree';
+}
 
 export interface ChatMessage {
   role: 'user' | 'model' | 'system';
-  content: string; // For user message, system message, or model's brief conversational text
-  explanation?: string; // For model's detailed explanation of code, formatted in markdown
-  code?: { path: string; content: string; }[]; // Can contain updates for multiple files
-  suggestions?: string[]; // Optional list of follow-up prompts
+  content: string;
+  explanation?: string;
+  code?: { path: string; content: string; }[];
+  suggestions?: string[];
 }
 
 export interface DraggableComponent {
@@ -51,7 +57,7 @@ export interface TerminalLine {
 export interface FileSystemChangeAction {
   action: 'create' | 'update' | 'delete';
   path: string;
-  content?: string; // only for create/update
+  content?: string;
 }
 
 export interface TerminalExecutionResult {
@@ -61,7 +67,6 @@ export interface TerminalExecutionResult {
     fileSystemChanges: FileSystemChangeAction[];
 }
 
-// System Operator Types
 export interface TemplateInfo {
   path: string;
   tags: string[];
@@ -76,7 +81,7 @@ export interface TemplateRegistry {
 export interface HandoverHistoryItem {
   action: 'create' | 'command' | 'feature-add' | 'debug';
   by: string;
-  at: string; // ISO string
+  at: string;
   details: {
     command?: string;
     status?: 'success' | 'failure';
@@ -100,7 +105,7 @@ export interface Handover {
     [key: string]: string;
   };
   status: 'initialized' | 'installing' | 'building' | 'running' | 'error';
-  created_at: string; // ISO string
+  created_at: string;
   history: HandoverHistoryItem[];
 }
 

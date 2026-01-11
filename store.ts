@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
-import type { FileSystemState, ChatMessage, TerminalLine, GithubUser, GithubRepo, GithubBranch, FileChange } from './types';
+import type { FileSystemState, ChatMessage, TerminalLine, GithubUser, GithubRepo, GithubBranch, FileChange, TreeItem } from './types';
 import dbService from './services/dbService';
 import { initialFileSystem, readmeContent, templateRegistry } from './constants';
 
@@ -37,6 +37,7 @@ export interface StoreState {
     isLoadingFromGithub: boolean;
     initialGithubFileSystem: FileSystemState | null;
     changedFiles: FileChange[];
+    gitTree: TreeItem[];
 
     // Actions
     loadStateFromDB: () => Promise<void>;
@@ -61,7 +62,7 @@ export interface StoreState {
     
     // GitHub Actions
     setGithubToken: (token: string) => void;
-    setGithubState: (state: Partial<Pick<StoreState, 'isGithubConnected' | 'githubUser' | 'githubRepos' | 'selectedRepoFullName' | 'repoBranches' | 'selectedBranchName' | 'initialGithubFileSystem' | 'changedFiles' | 'isLoadingFromGithub'>>) => void;
+    setGithubState: (state: Partial<Pick<StoreState, 'isGithubConnected' | 'githubUser' | 'githubRepos' | 'selectedRepoFullName' | 'repoBranches' | 'selectedBranchName' | 'initialGithubFileSystem' | 'changedFiles' | 'isLoadingFromGithub' | 'gitTree'>>) => void;
 
     // Derived State (as getters)
     canUndo: () => boolean;
@@ -94,6 +95,7 @@ const useStore = create<StoreState>()(subscribeWithSelector((set, get) => ({
     isLoadingFromGithub: false,
     initialGithubFileSystem: null,
     changedFiles: [],
+    gitTree: [],
 
     // Actions
     loadStateFromDB: async () => {
@@ -225,7 +227,6 @@ const useStore = create<StoreState>()(subscribeWithSelector((set, get) => ({
     canRedo: () => get().currentHistoryIndex < get().fileSystemHistory.length - 1,
 })));
 
-// Debounced auto-saving logic
 const debounce = (func: (...args: any[]) => void, delay: number) => {
     let timeout: ReturnType<typeof setTimeout>;
     return (...args: any[]) => {
@@ -238,7 +239,6 @@ const debouncedSave = debounce(() => {
     useStore.getState().saveState();
 }, 2000);
 
-// Subscribe to state changes for auto-saving
 useStore.subscribe(
     state => [
         state.fileSystem, 
@@ -260,7 +260,6 @@ useStore.subscribe(
     { equalityFn: shallow }
 );
 
-// This will trigger the calculation of changed files whenever the file system or the initial github fs changes.
 useStore.subscribe(
     state => [state.fileSystem, state.initialGithubFileSystem],
     ([fileSystem, initialGithubFileSystem]) => {

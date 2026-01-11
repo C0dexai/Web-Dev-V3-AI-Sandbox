@@ -23,7 +23,7 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
 }) => {
     const { 
         isConnected, user, repos, branches, selectedRepo, selectedBranch, 
-        changedFiles, error, githubToken, setGithubToken 
+        changedFiles, error, githubToken, setGithubToken, isLoadingFromGithub
     } = useStore(state => ({
         isConnected: state.isGithubConnected,
         user: state.githubUser,
@@ -35,6 +35,7 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
         error: state.error,
         githubToken: state.githubToken,
         setGithubToken: state.setGithubToken,
+        isLoadingFromGithub: state.isLoadingFromGithub,
     }));
     
     const [commitMessage, setCommitMessage] = useState('');
@@ -82,7 +83,6 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
                     {isLoading ? <SpinnerIcon className="h-5 w-5 animate-spin" /> : <GithubIcon className="h-5 w-5" />}
                     <span>{isLoading ? 'Connecting...' : 'Connect'}</span>
                 </button>
-                {error && <p className="text-sm text-red-500">{error}</p>}
             </form>
         );
     }
@@ -102,7 +102,7 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
             <div className="space-y-3">
                 <div>
                     <label htmlFor="repo-select" className="text-sm font-semibold mb-1 block">Repository</label>
-                    <select id="repo-select" value={selectedRepo} onChange={e => onRepoSelected(e.target.value)} className={inputStyles} disabled={isLoading}>
+                    <select id="repo-select" value={selectedRepo} onChange={e => onRepoSelected(e.target.value)} className={inputStyles} disabled={isLoadingFromGithub}>
                         <option value="">-- Select a Repository --</option>
                         {repos.map(r => <option key={r.full_name} value={r.full_name}>{r.full_name}</option>)}
                     </select>
@@ -110,15 +110,15 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
                 {selectedRepo && (
                     <div>
                         <label htmlFor="branch-select" className="text-sm font-semibold mb-1 block">Branch</label>
-                        <select id="branch-select" value={selectedBranch} onChange={e => onBranchSelected(e.target.value)} className={inputStyles} disabled={isLoading || branches.length === 0}>
+                        <select id="branch-select" value={selectedBranch} onChange={e => onBranchSelected(e.target.value)} className={inputStyles} disabled={isLoadingFromGithub || branches.length === 0}>
                             <option value="">-- Select a Branch --</option>
                             {branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
                         </select>
                     </div>
                 )}
-                <button onClick={onLoadRepo} disabled={isLoading || !selectedRepo || !selectedBranch} className={buttonStyles}>
-                    {isLoading ? <SpinnerIcon className="h-5 w-5 animate-spin" /> : null}
-                    <span>{isLoading ? 'Loading...' : 'Load Repo'}</span>
+                <button onClick={onLoadRepo} disabled={isLoadingFromGithub || !selectedRepo || !selectedBranch} className={buttonStyles}>
+                    {isLoadingFromGithub ? <SpinnerIcon className="h-5 w-5 animate-spin" /> : null}
+                    <span>{isLoadingFromGithub ? 'Loading Repo...' : 'Load Repo'}</span>
                 </button>
             </div>
 
@@ -143,6 +143,7 @@ const GithubPanel: React.FC<GithubPanelProps> = ({
                             className={`${inputStyles} h-20`}
                             placeholder="Enter commit message..."
                             required
+                            disabled={isLoading}
                         />
                     </div>
                     <button type="submit" disabled={isLoading || !commitMessage.trim()} className={buttonStyles}>

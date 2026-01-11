@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { chatWithAgent, refineCodeWithAgent, getAiHint, runCommandInTerminal } from '../services/geminiService';
-import * as githubService from '../services/githubService';
+import githubService from '../services/githubService';
 import useStore from '../store';
 import type { FileSystemState, ChatMessage, TerminalLine } from '../types';
 import { SpinnerIcon, MagicWandIcon, LightbulbIcon, DocumentTextIcon, GeminiIcon, MaximizeIcon, MinimizeIcon, ChevronDownIcon, ChevronUpIcon, CodeIcon, TerminalIcon, XIcon } from './Icons';
@@ -155,22 +155,24 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
     
     let scriptFileToRender: { path: string; content: string } | null = null;
     for (const path of scriptFilePaths) {
-        if (fileSystem[path] !== undefined) {
-            scriptFileToRender = { path, content: fileSystem[path] };
+        const content = fileSystem[path];
+        if (typeof content === 'string') {
+            scriptFileToRender = { path, content };
             break;
         }
     }
 
-    if (indexHtml !== undefined) {
+    if (typeof indexHtml === 'string') {
         const doc = new DOMParser().parseFromString(indexHtml, 'text/html');
 
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
             const href = link.getAttribute('href');
             if (href && !href.startsWith('http')) {
                 const cssPath = resolvePath(htmlPath, href);
-                if (fileSystem[cssPath]) {
+                const cssContent = fileSystem[cssPath];
+                if (typeof cssContent === 'string') {
                     const style = doc.createElement('style');
-                    style.textContent = fileSystem[cssPath];
+                    style.textContent = cssContent;
                     doc.head.appendChild(style);
                     link.remove();
                 }
@@ -181,9 +183,10 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
           const src = script.getAttribute('src');
           if (src && !src.startsWith('http')) {
             const jsPath = resolvePath(htmlPath, src);
-            if (fileSystem[jsPath]) {
+            const jsContent = fileSystem[jsPath];
+            if (typeof jsContent === 'string') {
               const newScript = doc.createElement('script');
-              newScript.textContent = fileSystem[jsPath];
+              newScript.textContent = jsContent;
               for (const attr of script.attributes) {
                 newScript.setAttribute(attr.name, attr.value);
               }
@@ -194,7 +197,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         });
 
         setSrcDoc(`<!DOCTYPE html>${doc.documentElement.outerHTML}`);
-    } else if (readmeMd !== undefined || indexMd !== undefined) {
+    } else if (typeof readmeMd === 'string' || typeof indexMd === 'string') {
       const mdContent = readmeMd || indexMd || '';
       const mdHtml = marked.parse(mdContent);
       
@@ -461,12 +464,37 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
     }
   }, [srcDoc, previewRoot, fileSystem]);
 
-  const handleFileSelect = (path: string) => {
+  const handleFileSelect = async (path: string) => {
       setActiveFile(path);
       if (!openFiles.includes(path)) {
           setOpenFiles([...openFiles, path]);
       }
       setActiveTab('editor');
+
+      if (store.fileSystem[path] === null && store.selectedRepoFullName) {
+          try {
+              const [owner, repo] = store.selectedRepoFullName.split('/');
+              const treeItem = store.gitTree.find(item => `/${item.path}` === path);
+
+              if (treeItem) {
+                  const content = await githubService.getFileContent(owner, repo, treeItem.sha);
+                  const newFs = { ...store.fileSystem, [path]: content };
+                  const newInitialFs = { ...store.initialGithubFileSystem, [path]: content };
+
+                  store.setFileSystem(newFs, false);
+                  store.setGithubState({ initialGithubFileSystem: newInitialFs });
+
+              } else {
+                   throw new Error("File not found in the repository tree.");
+              }
+          } catch (e: any) {
+              setError(`Failed to load file ${path}: ${e.message}`);
+              setOpenFiles(openFiles.filter(f => f !== path));
+              if (activeFile === path) {
+                  setActiveFile(openFiles[0] || null);
+              }
+          }
+      }
   };
 
   const handleApplyCode = (codeUpdates: { path: string; content: string }[]) => {
@@ -616,7 +644,9 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
     Object.keys(fileSystem).forEach(path => {
       if (path.endsWith('/.placeholder')) return;
       const content = fileSystem[path];
-      zip.file(path.substring(1), content);
+      if (typeof content === 'string') {
+        zip.file(path.substring(1), content);
+      }
     });
     zip.generateAsync({ type: 'blob' }).then(content => {
       const link = document.createElement('a');
@@ -731,7 +761,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
       setError('');
       setIsLoading(true);
       try {
-          const user = await githubService.connectToGithub(token);
+          const user = await githubService.connect(token);
           const repos = await githubService.listRepos();
           setGithubState({
               isGithubConnected: true,
@@ -741,14 +771,14 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
       } catch (e: any) {
           setError(e.message);
           store.setGithubToken('');
-          githubService.disconnectFromGithub();
+          githubService.disconnect();
       } finally {
           setIsLoading(false);
       }
   };
 
   const handleGithubDisconnect = () => {
-      githubService.disconnectFromGithub();
+      githubService.disconnect();
       store.setGithubToken('');
       setGithubState({
         isGithubConnected: false,
@@ -759,6 +789,7 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
         selectedBranchName: '',
         initialGithubFileSystem: null,
         changedFiles: [],
+        gitTree: [],
       });
   };
 
@@ -781,17 +812,38 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
   
   const handleLoadRepo = async () => {
     if (!store.selectedRepoFullName || !store.selectedBranchName) return;
-    setGithubState({ isLoadingFromGithub: true });
+    setGithubState({ isLoadingFromGithub: true, gitTree: [], fileSystem: {}, initialGithubFileSystem: {} });
     setIsLoading(true);
-    setLoadingMessage('Loading repository from GitHub...');
+    setLoadingMessage('Loading repository tree...');
     setError('');
     try {
         const [owner, repo] = store.selectedRepoFullName.split('/');
-        const fs = await githubService.getRepoContents(owner, repo, store.selectedBranchName);
+        const tree = await githubService.getRepoTree(owner, repo, store.selectedBranchName);
+
+        const fs: FileSystemState = {};
+        tree.forEach(item => {
+            fs[`/${item.path}`] = null;
+        });
+
         setFileSystem(fs, true);
-        setGithubState({ initialGithubFileSystem: fs, changedFiles: [] });
-        setOpenFiles(['/README.md', '/index.html'].filter(f => f in fs));
-        setActiveFile(Object.keys(fs).includes('/README.md') ? '/README.md' : (Object.keys(fs)[0] || null));
+        setGithubState({
+            initialGithubFileSystem: { ...fs },
+            changedFiles: [],
+            gitTree: tree
+        });
+
+        const readmePath = Object.keys(fs).find(p => p.toLowerCase().endsWith('readme.md'));
+        const htmlPath = Object.keys(fs).find(p => p.toLowerCase().endsWith('index.html'));
+        const filesToOpen = [readmePath, htmlPath].filter(Boolean) as string[];
+
+        setOpenFiles(filesToOpen);
+
+        if (filesToOpen.length > 0) {
+            await handleFileSelect(filesToOpen[0]);
+        } else {
+             setActiveFile(null);
+        }
+
         setPreviewRoot('/');
     } catch(e: any) {
         setError(`Failed to load repo: ${e.message}`);
@@ -804,20 +856,20 @@ const OrchestratorPanel: React.FC<OrchestratorPanelProps> = ({ isFocusMode, onTo
   
   const handleCommitAndPush = async (message: string) => {
       if (!store.selectedRepoFullName || !store.selectedBranchName || !initialGithubFileSystem) return;
+
       setIsLoading(true);
       setLoadingMessage('Committing and pushing to GitHub...');
       setError('');
       try {
           const [owner, repo] = store.selectedRepoFullName.split('/');
-          const commitUrl = await githubService.commitAndPush({
+          const commitUrl = await githubService.commitAndPush(
               owner,
               repo,
-              branch: store.selectedBranchName,
+              store.selectedBranchName,
               message,
-              changes: store.changedFiles,
-              currentFileSystem: fileSystem,
-              initialFileSystem: initialGithubFileSystem
-          });
+              store.changedFiles,
+              fileSystem,
+          );
           setGithubState({ initialGithubFileSystem: fileSystem, changedFiles: [] });
           alert(`Successfully pushed to GitHub! Commit URL: ${commitUrl}`);
       } catch (e: any) {
